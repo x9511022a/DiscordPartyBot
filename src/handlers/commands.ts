@@ -2,7 +2,7 @@ import {
   ChannelType, ChatInputCommandInteraction, EmbedBuilder, PermissionFlagsBits
 } from "discord.js";
 import { prisma } from "../db.js";
-import { assertPrivateHub, resolveGuild } from "../utils/discord.js";
+import { resolveGuild } from "../utils/discord.js";
 import { mainPanelView, publicPanelView } from "../ui/panels.js";
 
 async function publishPanel(interaction: ChatInputCommandInteraction, panelChannelId: string, oldChannelId?: string | null, oldMessageId?: string | null) {
@@ -32,14 +32,12 @@ async function handleSetup(interaction: ChatInputCommandInteraction) {
     const panel = interaction.options.getChannel("操作面板", true);
     const date = interaction.options.getChannel("約會貼文", true);
     const party = interaction.options.getChannel("公開派對", true);
-    const hub = interaction.options.getChannel("私人媒合", true);
     const moderation = interaction.options.getChannel("管理紀錄", true);
-    await assertPrivateHub(guild, hub.id);
     const panelMessageId = await publishPanel(interaction, panel.id, existing?.panelChannelId, existing?.panelMessageId);
     await prisma.guildConfig.upsert({
       where: { guildId: interaction.guildId! },
-      create: { guildId: interaction.guildId!, panelChannelId: panel.id, panelMessageId, dateChannelId: date.id, publicPartyChannelId: party.id, matchHubChannelId: hub.id, moderationChannelId: moderation.id },
-      update: { panelChannelId: panel.id, panelMessageId, dateChannelId: date.id, publicPartyChannelId: party.id, matchHubChannelId: hub.id, moderationChannelId: moderation.id }
+      create: { guildId: interaction.guildId!, panelChannelId: panel.id, panelMessageId, dateChannelId: date.id, publicPartyChannelId: party.id, moderationChannelId: moderation.id },
+      update: { panelChannelId: panel.id, panelMessageId, dateChannelId: date.id, publicPartyChannelId: party.id, moderationChannelId: moderation.id }
     });
     await interaction.editReply(`✅ 頻道設定完成，常駐面板已發布至 <#${panel.id}>。`);
     return;
@@ -65,7 +63,6 @@ async function handleSetup(interaction: ChatInputCommandInteraction) {
     { name: "操作面板", value: existing.panelChannelId ? `<#${existing.panelChannelId}>` : "尚未設定", inline: true },
     { name: "約會貼文", value: `<#${existing.dateChannelId}>`, inline: true },
     { name: "公開派對", value: `<#${existing.publicPartyChannelId}>`, inline: true },
-    { name: "私人媒合", value: `<#${existing.matchHubChannelId}>`, inline: true },
     { name: "管理紀錄", value: `<#${existing.moderationChannelId}>`, inline: true },
     { name: "身分組頻道", value: roles }
   )] });

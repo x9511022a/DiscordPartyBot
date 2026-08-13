@@ -1,14 +1,15 @@
 import { ActivityStatus, ApplicationStatus, AttendanceStatus } from "@prisma/client";
 import {
-  ActionRowBuilder, ButtonInteraction, ChannelType as DiscordChannelType, ModalBuilder,
+  ActionRowBuilder, ButtonInteraction, ChannelType, ModalBuilder,
   TextInputBuilder, TextInputStyle
 } from "discord.js";
 import { prisma } from "../db.js";
-import { joinParty, leaveParty, partyCounts } from "../services/party.js";
+import { joinParty, leaveParty, partyCounts, undoPartyJoin } from "../services/party.js";
 import { requireEligible } from "../services/policy.js";
 import { parseCustomId } from "../utils/custom-id.js";
 import { resolveGuild, safeDm } from "../utils/discord.js";
 import { dateMessage, partyMessage } from "../views.js";
+import { addActivityThreadMember, closeActivityThread, createPrivateActivityThread, ensurePartyThread, removeActivityThreadMember } from "../services/activity-threads.js";
 import { handlePanelButton, showManagedActivityFromPost } from "./panel.js";
 
 async function refreshParty(interaction: ButtonInteraction, partyId: string, disabled = false) {
@@ -35,17 +36,16 @@ async function acceptDate(interaction: ButtonInteraction, applicationId: string)
   let threadId: string | null = null;
   try {
     const guild = await interaction.client.guilds.fetch(post.guildId);
-    const cfg = await prisma.guildConfig.findUniqueOrThrow({ where: { guildId: post.guildId } });
-    const channel = await guild.channels.fetch(cfg.matchHubChannelId);
-    if (!channel || channel.type !== DiscordChannelType.GuildText) throw new Error("私人媒合區設定無效。");
-    await Promise.all([
-      channel.permissionOverwrites.edit(post.creatorId, { ViewChannel: true, SendMessages: false, SendMessagesInThreads: true }),
-      channel.permissionOverwrites.edit(application.applicantId, { ViewChannel: true, SendMessages: false, SendMessagesInThreads: true })
-    ]);
-    const thread = await channel.threads.create({ name: `約會媒合-${post.id.slice(-6)}`, type: DiscordChannelType.PrivateThread, invitable: false, reason: "約會申請已接受" });
+    if (!post.channelId) throw new Error("約會貼文缺少來源頻道，無法建立私人討論串。");
+    const channel = await guild.channels.fetch(post.channelId);
+    if (!channel || channel.type !== ChannelType.GuildText) throw new Error("約會貼文所在頻道無法建立私人討論串。");
+    const thread = await createPrivateActivityThread(
+      channel,
+      `約會媒合-${post.activity}-${post.id.slice(-6)}`,
+      [post.creatorId, application.applicantId],
+      `💗 <@${post.creatorId}> 與 <@${application.applicantId}> 已完成媒合。\n詳細地點：**${post.privateLocation}**\n請勿轉傳私人資訊；如有問題請從私人選單進入安全中心檢舉。`
+    );
     threadId = thread.id;
-    await Promise.all([thread.members.add(post.creatorId), thread.members.add(application.applicantId)]);
-    await thread.send(`💗 <@${post.creatorId}> 與 <@${application.applicantId}> 已完成媒合。\n詳細地點：**${post.privateLocation}**\n請勿轉傳私人資訊；如有問題請從私人選單進入安全中心檢舉。`);
     await prisma.$transaction([
       prisma.datePost.update({ where: { id: post.id }, data: { status: ActivityStatus.MATCHED, matchedUserId: application.applicantId, threadId, matchingAppId: null, closedAt: new Date() } }),
       prisma.dateApplication.update({ where: { id: application.id }, data: { status: ApplicationStatus.ACCEPTED } }),
@@ -105,13 +105,31 @@ export async function handleButton(interaction: ButtonInteraction): Promise<void
     const member = await guild.members.fetch(interaction.user.id);
     if (party.visibilityRoleId && !member.roles.cache.has(party.visibilityRoleId)) throw new Error("你沒有此派對所需的身分組。");
     const result = await joinParty(interaction.guildId, parsed.id, interaction.user.id);
-    await interaction.reply({ content: result.status === AttendanceStatus.GOING ? `報名成功！詳細地點：**${result.privateLocation}**` : "目前已額滿，你已加入候補。", ephemeral: true });
+    let partyThreadId = result.threadId;
+    if (result.status === AttendanceStatus.GOING) {
+      try {
+        partyThreadId ??= await ensurePartyThread(guild, parsed.id);
+        await addActivityThreadMember(guild, partyThreadId, interaction.user.id);
+      }
+      catch (error) {
+        await undoPartyJoin(parsed.id, interaction.user.id);
+        if (partyThreadId) await removeActivityThreadMember(guild, partyThreadId, interaction.user.id).catch(() => undefined);
+        throw error;
+      }
+    }
+    await interaction.reply({ content: result.status === AttendanceStatus.GOING ? `報名成功！已將你加入私人討論串：<#${partyThreadId}>。` : "目前已額滿，你已加入候補。", ephemeral: true });
     await refreshParty(interaction, parsed.id); return;
   }
   if (parsed.action === "party_leave") {
     const result = await leaveParty(interaction.guildId, parsed.id, interaction.user.id);
+    if (result.threadId) await removeActivityThreadMember(guild, result.threadId, interaction.user.id).catch(error => console.error("移除派對討論串成員失敗", error));
     await interaction.reply({ content: "已退出此派對。", ephemeral: true });
-    if (result.promotedUserId) await safeDm(guild, result.promotedUserId, `派對候補已遞補成功！詳細地點：**${result.privateLocation}**`);
+    if (result.promotedUserId) {
+      const threadId = result.threadId ?? await ensurePartyThread(guild, parsed.id).catch(() => undefined);
+      let added = false;
+      if (threadId) added = await addActivityThreadMember(guild, threadId, result.promotedUserId).then(() => true).catch(error => { console.error("加入遞補者至派對討論串失敗", error); return false; });
+      await safeDm(guild, result.promotedUserId, added ? `派對候補已遞補成功！私人討論串：<#${threadId}>。` : `派對候補已遞補成功！詳細地點：**${result.privateLocation}**`);
+    }
     await refreshParty(interaction, parsed.id); return;
   }
   if (parsed.action === "date_cancel") {
@@ -124,6 +142,7 @@ export async function handleButton(interaction: ButtonInteraction): Promise<void
     const updated = await prisma.datePost.findUniqueOrThrow({ where: { id: post.id } });
     await interaction.update(dateMessage(updated, true));
     for (const app of post.applications) await safeDm(guild, app.applicantId, `約會「${post.activity}」已取消。`);
+    await closeActivityThread(guild, post.threadId).catch(error => console.error("關閉約會討論串失敗", error));
     return;
   }
   if (parsed.action === "party_cancel") {
@@ -136,5 +155,6 @@ export async function handleButton(interaction: ButtonInteraction): Promise<void
     const updated = await prisma.party.findUniqueOrThrow({ where: { id: party.id } });
     await interaction.update(partyMessage(updated, 0, 0, true));
     for (const x of party.attendees) await safeDm(guild, x.userId, `派對「${party.name}」已取消。`);
+    await closeActivityThread(guild, party.threadId).catch(error => console.error("關閉派對討論串失敗", error));
   }
 }

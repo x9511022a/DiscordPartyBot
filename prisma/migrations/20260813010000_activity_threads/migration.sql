@@ -1,0 +1,2 @@
+ALTER TABLE "GuildConfig" ALTER COLUMN "matchHubChannelId" DROP NOT NULL;
+ALTER TABLE "Party" ADD COLUMN "threadId" TEXT;

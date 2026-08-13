@@ -11,7 +11,7 @@ describe("公開貼文隱私", () => {
   });
 
   it("Party 公開訊息不包含詳細地址", () => {
-    const party: Party = { ...base, id: "party1", guildId: "g", creatorId: "u", channelId: null, messageId: null, visibilityRoleId: null, name: "桌遊夜", scheduledAt: new Date("2026-09-01T00:00:00Z"), signupDeadline: new Date("2026-08-31T00:00:00Z"), publicArea: "信義區", privateLocation: "秘密包廂", description: "一起玩", capacity: 5, status: ActivityStatus.OPEN };
+    const party: Party = { ...base, id: "party1", guildId: "g", creatorId: "u", channelId: null, messageId: null, threadId: null, visibilityRoleId: null, name: "桌遊夜", scheduledAt: new Date("2026-09-01T00:00:00Z"), signupDeadline: new Date("2026-08-31T00:00:00Z"), publicArea: "信義區", privateLocation: "秘密包廂", description: "一起玩", capacity: 5, status: ActivityStatus.OPEN };
     expect(JSON.stringify(partyMessage(party, 3, 1))).not.toContain(party.privateLocation);
   });
 });

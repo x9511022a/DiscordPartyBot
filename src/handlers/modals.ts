@@ -1,9 +1,10 @@
 import { ActivityStatus } from "@prisma/client";
-import { Guild, ModalSubmitInteraction } from "discord.js";
+import { ChannelType, Guild, ModalSubmitInteraction } from "discord.js";
 import { prisma } from "../db.js";
 import { dateMessage, partyMessage } from "../views.js";
 import { partyCounts } from "../services/party.js";
 import { resolveGuild } from "../utils/discord.js";
+import { createPrivateActivityThread } from "../services/activity-threads.js";
 
 type DatePayload = { id?: string | null; scheduledAt: string; area: string };
 type PartyPayload = { id?: string | null; name: string; scheduledAt: string; signupDeadline: string; capacity: number; roleId?: string | null };
@@ -74,14 +75,20 @@ export async function handleModal(interaction: ModalSubmitInteraction): Promise<
   const roleChannel = p.roleId ? cfg.rolePartyChannels.find(x => x.roleId === p.roleId) : null;
   if (p.roleId && !roleChannel) throw new Error("此身分組尚未透過 `/設定 身分組頻道` 設定專屬頻道。");
   const channel = await guild.channels.fetch(roleChannel?.channelId ?? cfg.publicPartyChannelId);
-  if (!channel?.isTextBased()) throw new Error("設定的派對頻道不存在或無法傳送訊息。");
+  if (!channel || channel.type !== ChannelType.GuildText) throw new Error("設定的派對頻道不存在或無法傳送訊息。");
   const party = await prisma.party.create({ data: { guildId: interaction.guildId, creatorId: interaction.user.id, channelId: channel.id, ...data } });
+  let messageId: string | null = null; let threadId: string | null = null;
   try {
     const message = await channel.send(partyMessage(party, 0, 0));
-    await prisma.party.update({ where: { id: party.id }, data: { messageId: message.id } });
+    messageId = message.id;
+    const thread = await createPrivateActivityThread(channel, `派對-${party.name}-${party.id.slice(-6)}`, [party.creatorId], `🎉 <@${party.creatorId}> 的派對私人討論串。\n詳細地點：**${party.privateLocation}**\n正式參加者會由 Bot 自動加入；請勿轉傳私人資訊。`);
+    threadId = thread.id;
+    await prisma.party.update({ where: { id: party.id }, data: { messageId, threadId } });
     await prisma.interactionDraft.delete({ where: { id: draft.id } });
     await interaction.reply({ content: `派對已發布：${message.url}`, ephemeral: true });
   } catch (error) {
+    if (threadId) { const thread = await guild.channels.fetch(threadId).catch(() => null); if (thread?.isThread()) await thread.delete("派對發布失敗，清理討論串").catch(() => undefined); }
+    if (messageId) await channel.messages.delete(messageId).catch(() => undefined);
     await prisma.party.delete({ where: { id: party.id } }); throw error;
   }
 }

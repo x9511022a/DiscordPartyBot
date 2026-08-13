@@ -11,7 +11,6 @@ export const commands = [
       .addChannelOption(option => option.setName("操作面板").setDescription("常駐操作面板頻道").addChannelTypes(ChannelType.GuildText).setRequired(true))
       .addChannelOption(option => option.setName("約會貼文").setDescription("約會貼文頻道").addChannelTypes(ChannelType.GuildText).setRequired(true))
       .addChannelOption(option => option.setName("公開派對").setDescription("公開派對頻道").addChannelTypes(ChannelType.GuildText).setRequired(true))
-      .addChannelOption(option => option.setName("私人媒合").setDescription("禁止 @everyone 查看之私人媒合區").addChannelTypes(ChannelType.GuildText).setRequired(true))
       .addChannelOption(option => option.setName("管理紀錄").setDescription("僅管理團隊可見的紀錄頻道").addChannelTypes(ChannelType.GuildText).setRequired(true)))
     .addSubcommand(subcommand => subcommand
       .setName("身分組頻道")

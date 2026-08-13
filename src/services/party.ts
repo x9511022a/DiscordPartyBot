@@ -3,7 +3,7 @@ import { serializable } from "./transaction.js";
 import { isBlockedEitherWay } from "./policy.js";
 import { nextPartyStatus } from "../domain/rules.js";
 
-export async function joinParty(guildId: string, partyId: string, userId: string): Promise<{ status: AttendanceStatus; privateLocation?: string }> {
+export async function joinParty(guildId: string, partyId: string, userId: string): Promise<{ status: AttendanceStatus; privateLocation?: string; threadId?: string }> {
   return serializable(async tx => {
     const party = await tx.party.findUnique({ where: { id: partyId } });
     if (!party || party.guildId !== guildId) throw new Error("找不到派對。");
@@ -23,22 +23,22 @@ export async function joinParty(guildId: string, partyId: string, userId: string
       create: { partyId, userId, status, queueNumber: status === AttendanceStatus.WAITLISTED ? (lastWaiting?.queueNumber ?? 0) + 1 : null },
       update: { status, queueNumber: status === AttendanceStatus.WAITLISTED ? (lastWaiting?.queueNumber ?? 0) + 1 : null }
     });
-    return { status, privateLocation: status === AttendanceStatus.GOING ? party.privateLocation : undefined };
+    return { status, privateLocation: status === AttendanceStatus.GOING ? party.privateLocation : undefined, threadId: party.threadId ?? undefined };
   });
 }
 
-export async function leaveParty(guildId: string, partyId: string, userId: string): Promise<{ promotedUserId?: string; privateLocation?: string }> {
+export async function leaveParty(guildId: string, partyId: string, userId: string): Promise<{ promotedUserId?: string; privateLocation?: string; threadId?: string }> {
   return serializable(async tx => {
     const party = await tx.party.findUnique({ where: { id: partyId } });
     if (!party || party.guildId !== guildId) throw new Error("找不到派對。");
     const attendance = await tx.partyAttendance.findUnique({ where: { partyId_userId: { partyId, userId } } });
     if (!attendance || (attendance.status !== AttendanceStatus.GOING && attendance.status !== AttendanceStatus.WAITLISTED)) throw new Error("你目前沒有報名此派對。");
     await tx.partyAttendance.update({ where: { id: attendance.id }, data: { status: AttendanceStatus.LEFT, queueNumber: null } });
-    if (attendance.status === AttendanceStatus.WAITLISTED) return {};
+    if (attendance.status === AttendanceStatus.WAITLISTED) return { threadId: party.threadId ?? undefined };
     const next = await tx.partyAttendance.findFirst({ where: { partyId, status: AttendanceStatus.WAITLISTED }, orderBy: [{ queueNumber: "asc" }, { createdAt: "asc" }] });
-    if (!next) return {};
+    if (!next) return { threadId: party.threadId ?? undefined };
     await tx.partyAttendance.update({ where: { id: next.id }, data: { status: AttendanceStatus.GOING, queueNumber: null } });
-    return { promotedUserId: next.userId, privateLocation: party.privateLocation };
+    return { promotedUserId: next.userId, privateLocation: party.privateLocation, threadId: party.threadId ?? undefined };
   });
 }
 
@@ -49,4 +49,12 @@ export async function partyCounts(partyId: string): Promise<{ going: number; wai
     prisma.partyAttendance.count({ where: { partyId, status: AttendanceStatus.WAITLISTED } })
   ]);
   return { going, waiting };
+}
+
+export async function undoPartyJoin(partyId: string, userId: string): Promise<void> {
+  const { prisma } = await import("../db.js");
+  await prisma.partyAttendance.updateMany({
+    where: { partyId, userId, status: AttendanceStatus.GOING },
+    data: { status: AttendanceStatus.LEFT, queueNumber: null }
+  });
 }

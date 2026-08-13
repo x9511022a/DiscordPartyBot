@@ -51,7 +51,7 @@ model GuildConfig {
   guildId               String   @id
   dateChannelId         String
   publicPartyChannelId  String
-  matchHubChannelId     String
+  matchHubChannelId     String?
   moderationChannelId  String
   panelChannelId        String?
   panelMessageId        String?
@@ -127,6 +127,7 @@ model Party {
   creatorId       String
   channelId       String?
   messageId       String?
+  threadId        String?
   visibilityRoleId String?
   name            String
   scheduledAt     DateTime

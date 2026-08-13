@@ -2,7 +2,7 @@ import {
   ActivityStatus, AttendanceStatus, ModerationActionType, Prisma, ReportStatus
 } from "@prisma/client";
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonInteraction, ButtonStyle, EmbedBuilder, Guild, GuildMember,
+  ActionRowBuilder, ButtonBuilder, ButtonInteraction, ButtonStyle, ChannelType, EmbedBuilder, Guild, GuildMember,
   ModalBuilder, ModalSubmitInteraction, PermissionFlagsBits, StringSelectMenuBuilder,
   StringSelectMenuInteraction, TextInputBuilder, TextInputStyle, UserSelectMenuBuilder,
   UserSelectMenuInteraction
@@ -19,6 +19,7 @@ import { selectionToDate, timePickerView, type TimeSelection } from "../ui/time-
 import { discordTime } from "../utils/time.js";
 import { isDraftUsable } from "../ui/draft.js";
 import { assertSignupBeforeEvent } from "../domain/rules.js";
+import { closeActivityThread, createPrivateActivityThread } from "../services/activity-threads.js";
 
 const activityLabel = (status: string) => activityStatusLabels[status] ?? status;
 const attendanceLabel = (status: string) => attendanceStatusLabels[status] ?? status;
@@ -323,10 +324,20 @@ async function finishPartyCreate(interaction: StringSelectMenuInteraction, draft
   const draft = await getDraft(interaction, draftId, ["建立派對"]); const payload = draft.payload as DraftPayload;
   const config = await prisma.guildConfig.findUnique({ where: { guildId: interaction.guildId! }, include: { rolePartyChannels: true } }); if (!config) throw new Error("伺服器尚未完成設定。");
   const roleChannel = visibility === "公開" ? null : config.rolePartyChannels.find(item => item.roleId === visibility); if (visibility !== "公開" && !roleChannel) throw new Error("這個身分組頻道設定已失效。");
-  const guild = await resolveGuild(interaction); const channel = await guild.channels.fetch(roleChannel?.channelId ?? config.publicPartyChannelId); if (!channel?.isTextBased()) throw new Error("派對頻道無法使用。");
+  const guild = await resolveGuild(interaction); const channel = await guild.channels.fetch(roleChannel?.channelId ?? config.publicPartyChannelId); if (!channel || channel.type !== ChannelType.GuildText) throw new Error("派對頻道無法使用。");
   const capacity = Number(payload.capacity); const party = await prisma.party.create({ data: { guildId: interaction.guildId!, creatorId: interaction.user.id, channelId: channel.id, visibilityRoleId: visibility === "公開" ? null : visibility, name: String(payload.name), scheduledAt: new Date(String(payload.scheduledAt)), signupDeadline: new Date(String(payload.signupDeadline)), publicArea: String(payload.publicArea), privateLocation: String(payload.privateLocation), description: String(payload.description), capacity } });
-  try { const message = await channel.send(partyMessage(party, 0, 0)); await prisma.party.update({ where: { id: party.id }, data: { messageId: message.id } }); await prisma.interactionDraft.delete({ where: { id: draft.id } }); await interaction.update({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle("✅ 派對已發布").setDescription(`[前往貼文](${message.url})`)], components: [] }); }
-  catch (error) { await prisma.party.delete({ where: { id: party.id } }); throw error; }
+  let messageId: string | null = null; let threadId: string | null = null;
+  try {
+    const message = await channel.send(partyMessage(party, 0, 0)); messageId = message.id;
+    const thread = await createPrivateActivityThread(channel, `派對-${party.name}-${party.id.slice(-6)}`, [party.creatorId], `🎉 <@${party.creatorId}> 的派對私人討論串。\n詳細地點：**${party.privateLocation}**\n正式參加者會由 Bot 自動加入；請勿轉傳私人資訊。`); threadId = thread.id;
+    await prisma.party.update({ where: { id: party.id }, data: { messageId, threadId } });
+    await prisma.interactionDraft.delete({ where: { id: draft.id } });
+    await interaction.update({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle("✅ 派對已發布").setDescription(`[前往貼文](${message.url})\n[私人討論串](https://discord.com/channels/${interaction.guildId}/${thread.id})`)], components: [] });
+  } catch (error) {
+    if (threadId) { const thread = await guild.channels.fetch(threadId).catch(() => null); if (thread?.isThread()) await thread.delete("派對發布失敗，清理討論串").catch(() => undefined); }
+    if (messageId) await channel.messages.delete(messageId).catch(() => undefined);
+    await prisma.party.delete({ where: { id: party.id } }); throw error;
+  }
 }
 
 async function showActivity(interaction: StringSelectMenuInteraction, value: string) {
@@ -353,10 +364,12 @@ async function cancelActivity(interaction: ButtonInteraction, customId: string) 
     const post = await prisma.datePost.findFirst({ where: { id, guildId: interaction.guildId!, creatorId: interaction.user.id, status: { in: [ActivityStatus.OPEN, ActivityStatus.MATCHED] } }, include: { applications: true } }); if (!post) throw new Error("找不到可取消的約會。");
     await prisma.$transaction([prisma.datePost.update({ where: { id: post.id }, data: { status: ActivityStatus.CANCELLED, closedAt: new Date(), matchingAppId: null } }), prisma.dateApplication.updateMany({ where: { datePostId: post.id, status: { in: ["PENDING", "MATCHING", "ACCEPTED"] } }, data: { status: "CANCELLED" } })]);
     for (const application of post.applications) await safeDm(guild, application.applicantId, `約會「${post.activity}」已取消。`); await updatePublicDate(guild, post.id);
+    await closeActivityThread(guild, post.threadId).catch(error => console.error("關閉約會討論串失敗", error));
   } else {
     const party = await prisma.party.findFirst({ where: { id, guildId: interaction.guildId!, creatorId: interaction.user.id, status: ActivityStatus.OPEN }, include: { attendees: true } }); if (!party) throw new Error("找不到可取消的派對。");
     await prisma.$transaction([prisma.party.update({ where: { id: party.id }, data: { status: ActivityStatus.CANCELLED, closedAt: new Date() } }), prisma.partyAttendance.updateMany({ where: { partyId: party.id, status: { in: [AttendanceStatus.GOING, AttendanceStatus.WAITLISTED] } }, data: { status: AttendanceStatus.CANCELLED, queueNumber: null } })]);
     for (const attendee of party.attendees) await safeDm(guild, attendee.userId, `派對「${party.name}」已取消。`); await updatePublicParty(guild, party.id);
+    await closeActivityThread(guild, party.threadId).catch(error => console.error("關閉派對討論串失敗", error));
   }
   await interaction.update({ embeds: [new EmbedBuilder().setColor(0x57f287).setTitle("✅ 活動已取消")], components: [] });
 }
