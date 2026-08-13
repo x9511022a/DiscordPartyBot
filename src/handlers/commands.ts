@@ -6,7 +6,7 @@ import {
 import { prisma } from "../db.js";
 import { requireEligible } from "../services/policy.js";
 import { consumeRateLimit } from "../services/rate-limit.js";
-import { assertPrivateHub } from "../utils/discord.js";
+import { assertPrivateHub, resolveGuild } from "../utils/discord.js";
 import { parseDateTime } from "../utils/time.js";
 
 function row(input: TextInputBuilder) { return new ActionRowBuilder<TextInputBuilder>().addComponents(input); }
@@ -21,6 +21,7 @@ async function makeDraft(interaction: ChatInputCommandInteraction, kind: string,
 }
 
 async function setup(interaction: ChatInputCommandInteraction) {
+  const guild = await resolveGuild(interaction);
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) throw new Error("需要管理伺服器權限。");
   const sub = interaction.options.getSubcommand();
   if (sub === "channels") {
@@ -28,7 +29,7 @@ async function setup(interaction: ChatInputCommandInteraction) {
     const party = interaction.options.getChannel("party", true);
     const hub = interaction.options.getChannel("match_hub", true);
     const moderation = interaction.options.getChannel("moderation", true);
-    await assertPrivateHub(interaction.guild!, hub.id);
+    await assertPrivateHub(guild, hub.id);
     await prisma.guildConfig.upsert({
       where: { guildId: interaction.guildId! },
       create: { guildId: interaction.guildId!, dateChannelId: date.id, publicPartyChannelId: party.id, matchHubChannelId: hub.id, moderationChannelId: moderation.id },
@@ -42,9 +43,9 @@ async function setup(interaction: ChatInputCommandInteraction) {
   if (sub === "role_channel") {
     const role = interaction.options.getRole("role", true);
     const selected = interaction.options.getChannel("channel", true);
-    const channel = await interaction.guild!.channels.fetch(selected.id);
+    const channel = await guild.channels.fetch(selected.id);
     if (!channel || channel.type !== ChannelType.GuildText) throw new Error("必須選擇文字頻道。");
-    const everyoneCanView = channel.permissionsFor(interaction.guild!.roles.everyone)?.has(PermissionFlagsBits.ViewChannel);
+    const everyoneCanView = channel.permissionsFor(guild.roles.everyone)?.has(PermissionFlagsBits.ViewChannel);
     const roleCanView = channel.permissionsFor(role.id)?.has(PermissionFlagsBits.ViewChannel);
     if (everyoneCanView || !roleCanView) throw new Error("此頻道必須禁止 @everyone 查看，並允許指定 Role 查看。");
     await prisma.rolePartyChannel.upsert({
@@ -119,7 +120,7 @@ async function myActivities(interaction: ChatInputCommandInteraction) {
 }
 
 export async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
-  if (!interaction.inCachedGuild()) throw new Error("此指令只能在伺服器中使用。");
+  if (!interaction.guildId) throw new Error("此指令只能在伺服器中使用。");
   switch (interaction.commandName) {
     case "setup": return setup(interaction);
     case "開始使用": {

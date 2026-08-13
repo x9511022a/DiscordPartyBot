@@ -1,20 +1,22 @@
 import { ActivityStatus } from "@prisma/client";
-import { ModalSubmitInteraction } from "discord.js";
+import { Guild, ModalSubmitInteraction } from "discord.js";
 import { prisma } from "../db.js";
 import { dateMessage, partyMessage } from "../views.js";
 import { partyCounts } from "../services/party.js";
+import { resolveGuild } from "../utils/discord.js";
 
 type DatePayload = { id?: string | null; scheduledAt: string; area: string };
 type PartyPayload = { id?: string | null; name: string; scheduledAt: string; signupDeadline: string; capacity: number; roleId?: string | null };
 
-async function updatePublishedMessage(channelId: string | null, messageId: string | null, interaction: ModalSubmitInteraction, body: object) {
-  if (!channelId || !messageId || !interaction.guild) return;
-  const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);
+async function updatePublishedMessage(channelId: string | null, messageId: string | null, guild: Guild, body: object) {
+  if (!channelId || !messageId) return;
+  const channel = await guild.channels.fetch(channelId).catch(() => null);
   if (channel?.isTextBased()) await channel.messages.fetch(messageId).then(m => m.edit(body)).catch(() => undefined);
 }
 
 export async function handleModal(interaction: ModalSubmitInteraction): Promise<void> {
-  if (!interaction.guildId || !interaction.guild) throw new Error("此操作只能在伺服器中完成。");
+  if (!interaction.guildId) throw new Error("此操作只能在伺服器中完成。");
+  const guild = await resolveGuild(interaction);
   const [kind, draftId] = interaction.customId.split(":");
   if ((kind !== "date_form" && kind !== "party_form") || !draftId) throw new Error("表單已失效。");
   const draft = await prisma.interactionDraft.findFirst({ where: { id: draftId, guildId: interaction.guildId, userId: interaction.user.id } });
@@ -35,10 +37,10 @@ export async function handleModal(interaction: ModalSubmitInteraction): Promise<
     if (draft.kind === "DATE_EDIT" && p.id) {
       const post = await prisma.datePost.update({ where: { id: p.id }, data });
       await prisma.interactionDraft.delete({ where: { id: draft.id } });
-      await updatePublishedMessage(post.channelId, post.messageId, interaction, dateMessage(post));
+      await updatePublishedMessage(post.channelId, post.messageId, guild, dateMessage(post));
       await interaction.reply({ content: `約會已更新：\`${post.id}\`。`, ephemeral: true }); return;
     }
-    const channel = await interaction.guild.channels.fetch(cfg.dateChannelId);
+    const channel = await guild.channels.fetch(cfg.dateChannelId);
     if (!channel?.isTextBased()) throw new Error("設定的約會頻道不存在或無法傳送訊息。");
     const post = await prisma.datePost.create({ data: { guildId: interaction.guildId, creatorId: interaction.user.id, channelId: channel.id, ...data } });
     try {
@@ -66,12 +68,12 @@ export async function handleModal(interaction: ModalSubmitInteraction): Promise<
     const party = await prisma.party.update({ where: { id: p.id }, data });
     await prisma.interactionDraft.delete({ where: { id: draft.id } });
     const counts = await partyCounts(party.id);
-    await updatePublishedMessage(party.channelId, party.messageId, interaction, partyMessage(party, counts.going, counts.waiting));
+    await updatePublishedMessage(party.channelId, party.messageId, guild, partyMessage(party, counts.going, counts.waiting));
     await interaction.reply({ content: `Party 已更新：\`${party.id}\`。`, ephemeral: true }); return;
   }
   const roleChannel = p.roleId ? cfg.rolePartyChannels.find(x => x.roleId === p.roleId) : null;
   if (p.roleId && !roleChannel) throw new Error("此 Role 尚未透過 /setup role_channel 設定專屬頻道。");
-  const channel = await interaction.guild.channels.fetch(roleChannel?.channelId ?? cfg.publicPartyChannelId);
+  const channel = await guild.channels.fetch(roleChannel?.channelId ?? cfg.publicPartyChannelId);
   if (!channel?.isTextBased()) throw new Error("設定的 Party 頻道不存在或無法傳送訊息。");
   const party = await prisma.party.create({ data: { guildId: interaction.guildId, creatorId: interaction.user.id, channelId: channel.id, ...data } });
   try {

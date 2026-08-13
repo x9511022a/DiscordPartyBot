@@ -1,13 +1,13 @@
 import { ActivityStatus, ApplicationStatus, AttendanceStatus } from "@prisma/client";
 import {
-  ActionRowBuilder, ButtonInteraction, ChannelType as DiscordChannelType, GuildMember, ModalBuilder,
+  ActionRowBuilder, ButtonInteraction, ChannelType as DiscordChannelType, ModalBuilder,
   TextInputBuilder, TextInputStyle
 } from "discord.js";
 import { prisma } from "../db.js";
 import { joinParty, leaveParty, partyCounts } from "../services/party.js";
 import { requireEligible } from "../services/policy.js";
 import { parseCustomId } from "../utils/custom-id.js";
-import { safeDm } from "../utils/discord.js";
+import { resolveGuild, safeDm } from "../utils/discord.js";
 import { dateMessage, partyMessage } from "../views.js";
 
 async function refreshParty(interaction: ButtonInteraction, partyId: string, disabled = false) {
@@ -85,7 +85,8 @@ export async function handleButton(interaction: ButtonInteraction): Promise<void
   const parsed = parseCustomId(interaction.customId); if (!parsed) return;
   if (parsed.action === "date_accept") return acceptDate(interaction, parsed.id);
   if (parsed.action === "date_decline") return declineDate(interaction, parsed.id);
-  if (!interaction.inCachedGuild()) throw new Error("此操作必須在伺服器內完成。");
+  if (!interaction.guildId) throw new Error("此操作必須在伺服器內完成。");
+  const guild = await resolveGuild(interaction);
   await requireEligible(prisma, interaction.guildId, interaction.user.id);
 
   if (parsed.action === "date_apply") {
@@ -97,7 +98,7 @@ export async function handleButton(interaction: ButtonInteraction): Promise<void
   if (parsed.action === "party_join") {
     const party = await prisma.party.findUnique({ where: { id: parsed.id } });
     if (!party || party.guildId !== interaction.guildId) throw new Error("找不到 Party。");
-    const member = interaction.member as GuildMember;
+    const member = await guild.members.fetch(interaction.user.id);
     if (party.visibilityRoleId && !member.roles.cache.has(party.visibilityRoleId)) throw new Error("你沒有此 Party 所需的 Role。");
     const result = await joinParty(interaction.guildId, parsed.id, interaction.user.id);
     await interaction.reply({ content: result.status === AttendanceStatus.GOING ? `報名成功！詳細地點：**${result.privateLocation}**` : "目前已額滿，你已加入候補。", ephemeral: true });
@@ -106,7 +107,7 @@ export async function handleButton(interaction: ButtonInteraction): Promise<void
   if (parsed.action === "party_leave") {
     const result = await leaveParty(interaction.guildId, parsed.id, interaction.user.id);
     await interaction.reply({ content: "已退出此 Party。", ephemeral: true });
-    if (result.promotedUserId) await safeDm(interaction.guild, result.promotedUserId, `Party 候補已遞補成功！詳細地點：**${result.privateLocation}**`);
+    if (result.promotedUserId) await safeDm(guild, result.promotedUserId, `Party 候補已遞補成功！詳細地點：**${result.privateLocation}**`);
     await refreshParty(interaction, parsed.id); return;
   }
   if (parsed.action === "date_cancel") {
@@ -118,7 +119,7 @@ export async function handleButton(interaction: ButtonInteraction): Promise<void
     ]);
     const updated = await prisma.datePost.findUniqueOrThrow({ where: { id: post.id } });
     await interaction.update(dateMessage(updated, true));
-    for (const app of post.applications) await safeDm(interaction.guild, app.applicantId, `約會「${post.activity}」已取消。`);
+    for (const app of post.applications) await safeDm(guild, app.applicantId, `約會「${post.activity}」已取消。`);
     return;
   }
   if (parsed.action === "party_cancel") {
@@ -130,6 +131,6 @@ export async function handleButton(interaction: ButtonInteraction): Promise<void
     ]);
     const updated = await prisma.party.findUniqueOrThrow({ where: { id: party.id } });
     await interaction.update(partyMessage(updated, 0, 0, true));
-    for (const x of party.attendees) await safeDm(interaction.guild, x.userId, `Party「${party.name}」已取消。`);
+    for (const x of party.attendees) await safeDm(guild, x.userId, `Party「${party.name}」已取消。`);
   }
 }
