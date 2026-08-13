@@ -53,6 +53,8 @@ model GuildConfig {
   publicPartyChannelId  String
   matchHubChannelId     String
   moderationChannelId  String
+  panelChannelId        String?
+  panelMessageId        String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
   rolePartyChannels     RolePartyChannel[]

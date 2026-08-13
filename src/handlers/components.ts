@@ -9,6 +9,7 @@ import { requireEligible } from "../services/policy.js";
 import { parseCustomId } from "../utils/custom-id.js";
 import { resolveGuild, safeDm } from "../utils/discord.js";
 import { dateMessage, partyMessage } from "../views.js";
+import { handlePanelButton, showManagedActivityFromPost } from "./panel.js";
 
 async function refreshParty(interaction: ButtonInteraction, partyId: string, disabled = false) {
   const party = await prisma.party.findUnique({ where: { id: partyId } });
@@ -44,7 +45,7 @@ async function acceptDate(interaction: ButtonInteraction, applicationId: string)
     const thread = await channel.threads.create({ name: `約會媒合-${post.id.slice(-6)}`, type: DiscordChannelType.PrivateThread, invitable: false, reason: "約會申請已接受" });
     threadId = thread.id;
     await Promise.all([thread.members.add(post.creatorId), thread.members.add(application.applicantId)]);
-    await thread.send(`💗 <@${post.creatorId}> 與 <@${application.applicantId}> 已完成媒合。\n詳細地點：**${post.privateLocation}**\n請勿轉傳私人資訊；如有問題請使用 /report。`);
+    await thread.send(`💗 <@${post.creatorId}> 與 <@${application.applicantId}> 已完成媒合。\n詳細地點：**${post.privateLocation}**\n請勿轉傳私人資訊；如有問題請從私人選單進入安全中心檢舉。`);
     await prisma.$transaction([
       prisma.datePost.update({ where: { id: post.id }, data: { status: ActivityStatus.MATCHED, matchedUserId: application.applicantId, threadId, matchingAppId: null, closedAt: new Date() } }),
       prisma.dateApplication.update({ where: { id: application.id }, data: { status: ApplicationStatus.ACCEPTED } }),
@@ -82,7 +83,10 @@ async function declineDate(interaction: ButtonInteraction, applicationId: string
 }
 
 export async function handleButton(interaction: ButtonInteraction): Promise<void> {
+  if (await handlePanelButton(interaction)) return;
   const parsed = parseCustomId(interaction.customId); if (!parsed) return;
+  if (parsed.action === "date_manage") return showManagedActivityFromPost(interaction, "約會", parsed.id);
+  if (parsed.action === "party_manage") return showManagedActivityFromPost(interaction, "派對", parsed.id);
   if (parsed.action === "date_accept") return acceptDate(interaction, parsed.id);
   if (parsed.action === "date_decline") return declineDate(interaction, parsed.id);
   if (!interaction.guildId) throw new Error("此操作必須在伺服器內完成。");
@@ -97,17 +101,17 @@ export async function handleButton(interaction: ButtonInteraction): Promise<void
   }
   if (parsed.action === "party_join") {
     const party = await prisma.party.findUnique({ where: { id: parsed.id } });
-    if (!party || party.guildId !== interaction.guildId) throw new Error("找不到 Party。");
+    if (!party || party.guildId !== interaction.guildId) throw new Error("找不到派對。");
     const member = await guild.members.fetch(interaction.user.id);
-    if (party.visibilityRoleId && !member.roles.cache.has(party.visibilityRoleId)) throw new Error("你沒有此 Party 所需的 Role。");
+    if (party.visibilityRoleId && !member.roles.cache.has(party.visibilityRoleId)) throw new Error("你沒有此派對所需的身分組。");
     const result = await joinParty(interaction.guildId, parsed.id, interaction.user.id);
     await interaction.reply({ content: result.status === AttendanceStatus.GOING ? `報名成功！詳細地點：**${result.privateLocation}**` : "目前已額滿，你已加入候補。", ephemeral: true });
     await refreshParty(interaction, parsed.id); return;
   }
   if (parsed.action === "party_leave") {
     const result = await leaveParty(interaction.guildId, parsed.id, interaction.user.id);
-    await interaction.reply({ content: "已退出此 Party。", ephemeral: true });
-    if (result.promotedUserId) await safeDm(guild, result.promotedUserId, `Party 候補已遞補成功！詳細地點：**${result.privateLocation}**`);
+    await interaction.reply({ content: "已退出此派對。", ephemeral: true });
+    if (result.promotedUserId) await safeDm(guild, result.promotedUserId, `派對候補已遞補成功！詳細地點：**${result.privateLocation}**`);
     await refreshParty(interaction, parsed.id); return;
   }
   if (parsed.action === "date_cancel") {
@@ -124,13 +128,13 @@ export async function handleButton(interaction: ButtonInteraction): Promise<void
   }
   if (parsed.action === "party_cancel") {
     const party = await prisma.party.findFirst({ where: { id: parsed.id, guildId: interaction.guildId, creatorId: interaction.user.id, status: ActivityStatus.OPEN }, include: { attendees: true } });
-    if (!party) throw new Error("只有發起者可以取消有效的 Party。");
+    if (!party) throw new Error("只有發起者可以取消有效的派對。");
     await prisma.$transaction([
       prisma.party.update({ where: { id: party.id }, data: { status: ActivityStatus.CANCELLED, closedAt: new Date() } }),
       prisma.partyAttendance.updateMany({ where: { partyId: party.id, status: { in: [AttendanceStatus.GOING, AttendanceStatus.WAITLISTED] } }, data: { status: AttendanceStatus.CANCELLED, queueNumber: null } })
     ]);
     const updated = await prisma.party.findUniqueOrThrow({ where: { id: party.id } });
     await interaction.update(partyMessage(updated, 0, 0, true));
-    for (const x of party.attendees) await safeDm(guild, x.userId, `Party「${party.name}」已取消。`);
+    for (const x of party.attendees) await safeDm(guild, x.userId, `派對「${party.name}」已取消。`);
   }
 }

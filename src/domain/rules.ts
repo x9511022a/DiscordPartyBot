@@ -16,3 +16,7 @@ export function nextPartyStatus(going: number, capacity: number): AttendanceStat
 export function canReserveDate(postStatus: string, applicationStatus: string): boolean {
   return postStatus === "OPEN" && applicationStatus === "PENDING";
 }
+
+export function assertSignupBeforeEvent(signupDeadline: Date, scheduledAt: Date): void {
+  if (signupDeadline >= scheduledAt) throw new Error("報名截止時間必須早於活動時間。");
+}

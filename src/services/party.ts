@@ -6,13 +6,13 @@ import { nextPartyStatus } from "../domain/rules.js";
 export async function joinParty(guildId: string, partyId: string, userId: string): Promise<{ status: AttendanceStatus; privateLocation?: string }> {
   return serializable(async tx => {
     const party = await tx.party.findUnique({ where: { id: partyId } });
-    if (!party || party.guildId !== guildId) throw new Error("找不到 Party。");
-    if (party.creatorId === userId) throw new Error("發起者不需要報名自己的 Party。");
-    if (party.status !== "OPEN" || party.signupDeadline <= new Date()) throw new Error("此 Party 已停止報名。");
+    if (!party || party.guildId !== guildId) throw new Error("找不到派對。");
+    if (party.creatorId === userId) throw new Error("發起者不需要報名自己的派對。");
+    if (party.status !== "OPEN" || party.signupDeadline <= new Date()) throw new Error("此派對已停止報名。");
     if (await isBlockedEitherWay(tx, guildId, party.creatorId, userId)) throw new Error("你無法參加此活動。");
 
     const existing = await tx.partyAttendance.findUnique({ where: { partyId_userId: { partyId, userId } } });
-    if (existing && (existing.status === AttendanceStatus.GOING || existing.status === AttendanceStatus.WAITLISTED)) throw new Error("你已經報名此 Party。");
+    if (existing && (existing.status === AttendanceStatus.GOING || existing.status === AttendanceStatus.WAITLISTED)) throw new Error("你已經報名此派對。");
     const going = await tx.partyAttendance.count({ where: { partyId, status: AttendanceStatus.GOING } });
     const status = nextPartyStatus(going, party.capacity);
     const lastWaiting = status === AttendanceStatus.WAITLISTED
@@ -30,9 +30,9 @@ export async function joinParty(guildId: string, partyId: string, userId: string
 export async function leaveParty(guildId: string, partyId: string, userId: string): Promise<{ promotedUserId?: string; privateLocation?: string }> {
   return serializable(async tx => {
     const party = await tx.party.findUnique({ where: { id: partyId } });
-    if (!party || party.guildId !== guildId) throw new Error("找不到 Party。");
+    if (!party || party.guildId !== guildId) throw new Error("找不到派對。");
     const attendance = await tx.partyAttendance.findUnique({ where: { partyId_userId: { partyId, userId } } });
-    if (!attendance || (attendance.status !== AttendanceStatus.GOING && attendance.status !== AttendanceStatus.WAITLISTED)) throw new Error("你目前沒有報名此 Party。");
+    if (!attendance || (attendance.status !== AttendanceStatus.GOING && attendance.status !== AttendanceStatus.WAITLISTED)) throw new Error("你目前沒有報名此派對。");
     await tx.partyAttendance.update({ where: { id: attendance.id }, data: { status: AttendanceStatus.LEFT, queueNumber: null } });
     if (attendance.status === AttendanceStatus.WAITLISTED) return {};
     const next = await tx.partyAttendance.findFirst({ where: { partyId, status: AttendanceStatus.WAITLISTED }, orderBy: [{ queueNumber: "asc" }, { createdAt: "asc" }] });

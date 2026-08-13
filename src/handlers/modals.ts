@@ -22,7 +22,7 @@ export async function handleModal(interaction: ModalSubmitInteraction): Promise<
   const draft = await prisma.interactionDraft.findFirst({ where: { id: draftId, guildId: interaction.guildId, userId: interaction.user.id } });
   if (!draft || draft.expiresAt <= new Date()) throw new Error("表單已逾時，請重新執行指令。");
   const cfg = await prisma.guildConfig.findUnique({ where: { guildId: interaction.guildId }, include: { rolePartyChannels: true } });
-  if (!cfg) throw new Error("伺服器尚未完成 /setup。");
+  if (!cfg) throw new Error("伺服器尚未完成 `/設定 頻道`。");
 
   if (kind === "date_form") {
     const p = draft.payload as DatePayload;
@@ -69,18 +69,18 @@ export async function handleModal(interaction: ModalSubmitInteraction): Promise<
     await prisma.interactionDraft.delete({ where: { id: draft.id } });
     const counts = await partyCounts(party.id);
     await updatePublishedMessage(party.channelId, party.messageId, guild, partyMessage(party, counts.going, counts.waiting));
-    await interaction.reply({ content: `Party 已更新：\`${party.id}\`。`, ephemeral: true }); return;
+    await interaction.reply({ content: `派對已更新：\`${party.id}\`。`, ephemeral: true }); return;
   }
   const roleChannel = p.roleId ? cfg.rolePartyChannels.find(x => x.roleId === p.roleId) : null;
-  if (p.roleId && !roleChannel) throw new Error("此 Role 尚未透過 /setup role_channel 設定專屬頻道。");
+  if (p.roleId && !roleChannel) throw new Error("此身分組尚未透過 `/設定 身分組頻道` 設定專屬頻道。");
   const channel = await guild.channels.fetch(roleChannel?.channelId ?? cfg.publicPartyChannelId);
-  if (!channel?.isTextBased()) throw new Error("設定的 Party 頻道不存在或無法傳送訊息。");
+  if (!channel?.isTextBased()) throw new Error("設定的派對頻道不存在或無法傳送訊息。");
   const party = await prisma.party.create({ data: { guildId: interaction.guildId, creatorId: interaction.user.id, channelId: channel.id, ...data } });
   try {
     const message = await channel.send(partyMessage(party, 0, 0));
     await prisma.party.update({ where: { id: party.id }, data: { messageId: message.id } });
     await prisma.interactionDraft.delete({ where: { id: draft.id } });
-    await interaction.reply({ content: `Party 已發布：${message.url}`, ephemeral: true });
+    await interaction.reply({ content: `派對已發布：${message.url}`, ephemeral: true });
   } catch (error) {
     await prisma.party.delete({ where: { id: party.id } }); throw error;
   }

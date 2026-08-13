@@ -1,6 +1,6 @@
 import { AttendanceStatus, ModerationActionType } from "@prisma/client";
 import { describe, expect, it } from "vitest";
-import { assertConsent, assertModerationEligibility, canReserveDate, nextPartyStatus } from "../src/domain/rules.js";
+import { assertConsent, assertModerationEligibility, assertSignupBeforeEvent, canReserveDate, nextPartyStatus } from "../src/domain/rules.js";
 
 describe("資格與狀態規則", () => {
   it("未完成 18+ 自我聲明時拒絕操作", () => {
@@ -25,5 +25,12 @@ describe("資格與狀態規則", () => {
     expect(canReserveDate("OPEN", "PENDING")).toBe(true);
     expect(canReserveDate("MATCHING", "PENDING")).toBe(false);
     expect(canReserveDate("OPEN", "ACCEPTED")).toBe(false);
+  });
+
+  it("派對報名截止必須早於活動時間", () => {
+    const event = new Date("2026-08-20T12:00:00Z");
+    expect(() => assertSignupBeforeEvent(new Date("2026-08-20T11:00:00Z"), event)).not.toThrow();
+    expect(() => assertSignupBeforeEvent(event, event)).toThrow("早於活動時間");
+    expect(() => assertSignupBeforeEvent(new Date("2026-08-20T13:00:00Z"), event)).toThrow("早於活動時間");
   });
 });
