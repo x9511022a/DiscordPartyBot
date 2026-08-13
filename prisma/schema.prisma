@@ -1,0 +1,223 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ActivityStatus {
+  OPEN
+  MATCHING
+  MATCHED
+  CLOSED
+  CANCELLED
+  ENDED
+}
+
+enum ApplicationStatus {
+  PENDING
+  MATCHING
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
+  CANCELLED
+}
+
+enum AttendanceStatus {
+  GOING
+  WAITLISTED
+  LEFT
+  CANCELLED
+}
+
+enum ReportStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+enum ModerationActionType {
+  WARN
+  SUSPEND
+  BAN
+  UNSUSPEND
+  UNBAN
+  REMOVE_CONTENT
+}
+
+model GuildConfig {
+  guildId               String   @id
+  dateChannelId         String
+  publicPartyChannelId  String
+  matchHubChannelId     String
+  moderationChannelId  String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  rolePartyChannels     RolePartyChannel[]
+}
+
+model RolePartyChannel {
+  id        String   @id @default(cuid())
+  guildId   String
+  roleId    String
+  channelId String
+  createdAt DateTime @default(now())
+  config    GuildConfig @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@unique([guildId, roleId])
+  @@unique([guildId, channelId])
+}
+
+model UserConsent {
+  guildId       String
+  userId        String
+  acceptedAt    DateTime @default(now())
+  rulesVersion  String   @default("1")
+
+  @@id([guildId, userId])
+}
+
+model DatePost {
+  id              String         @id @default(cuid())
+  guildId         String
+  creatorId       String
+  channelId       String?
+  messageId       String?
+  threadId        String?
+  scheduledAt     DateTime
+  publicArea      String
+  privateLocation String
+  activity        String
+  cost            String
+  desiredPerson   String
+  notes           String?
+  status          ActivityStatus @default(OPEN)
+  matchedUserId   String?
+  matchingAppId   String?
+  closedAt        DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  applications    DateApplication[]
+
+  @@index([guildId, creatorId, createdAt])
+  @@index([guildId, status, scheduledAt])
+}
+
+model DateApplication {
+  id          String            @id @default(cuid())
+  datePostId  String
+  applicantId String
+  intro       String
+  status      ApplicationStatus @default(PENDING)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  datePost    DatePost          @relation(fields: [datePostId], references: [id], onDelete: Cascade)
+
+  @@unique([datePostId, applicantId])
+  @@index([applicantId, createdAt])
+}
+
+model Party {
+  id              String         @id @default(cuid())
+  guildId         String
+  creatorId       String
+  channelId       String?
+  messageId       String?
+  visibilityRoleId String?
+  name            String
+  scheduledAt     DateTime
+  signupDeadline  DateTime
+  publicArea      String
+  privateLocation String
+  description     String
+  capacity        Int
+  status          ActivityStatus @default(OPEN)
+  closedAt        DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  attendees       PartyAttendance[]
+
+  @@index([guildId, creatorId, createdAt])
+  @@index([guildId, status, scheduledAt])
+}
+
+model PartyAttendance {
+  id          String           @id @default(cuid())
+  partyId     String
+  userId      String
+  status      AttendanceStatus
+  queueNumber Int?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  party       Party            @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@unique([partyId, userId])
+  @@unique([partyId, queueNumber])
+  @@index([userId, createdAt])
+}
+
+model UserBlock {
+  guildId   String
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  @@id([guildId, blockerId, blockedId])
+  @@index([guildId, blockedId])
+}
+
+model Report {
+  id             String       @id @default(cuid())
+  guildId        String
+  reporterId     String
+  reportedUserId String
+  datePostId     String?
+  partyId        String?
+  reason         String
+  evidence       String?
+  status         ReportStatus @default(OPEN)
+  createdAt      DateTime     @default(now())
+  resolvedAt     DateTime?
+
+  @@index([guildId, status, createdAt])
+  @@index([reportedUserId, createdAt])
+}
+
+model ModerationAction {
+  id           String               @id @default(cuid())
+  guildId      String
+  moderatorId  String
+  targetUserId String
+  reportId     String?
+  action       ModerationActionType
+  reason       String
+  expiresAt    DateTime?
+  createdAt    DateTime             @default(now())
+
+  @@index([guildId, targetUserId, createdAt])
+  @@index([expiresAt])
+}
+
+model RateLimitEvent {
+  id        String   @id @default(cuid())
+  guildId   String
+  userId    String
+  action    String
+  createdAt DateTime @default(now())
+
+  @@index([guildId, userId, action, createdAt])
+}
+
+model InteractionDraft {
+  id        String   @id @default(cuid())
+  guildId   String
+  userId    String
+  kind      String
+  payload   Json
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}

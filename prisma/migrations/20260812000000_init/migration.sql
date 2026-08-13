@@ -1,0 +1,37 @@
+CREATE TYPE "ActivityStatus" AS ENUM ('OPEN', 'MATCHING', 'MATCHED', 'CLOSED', 'CANCELLED', 'ENDED');
+CREATE TYPE "ApplicationStatus" AS ENUM ('PENDING', 'MATCHING', 'ACCEPTED', 'DECLINED', 'WITHDRAWN', 'CANCELLED');
+CREATE TYPE "AttendanceStatus" AS ENUM ('GOING', 'WAITLISTED', 'LEFT', 'CANCELLED');
+CREATE TYPE "ReportStatus" AS ENUM ('OPEN', 'RESOLVED', 'DISMISSED');
+CREATE TYPE "ModerationActionType" AS ENUM ('WARN', 'SUSPEND', 'BAN', 'UNSUSPEND', 'UNBAN', 'REMOVE_CONTENT');
+
+CREATE TABLE "GuildConfig" ("guildId" TEXT PRIMARY KEY, "dateChannelId" TEXT NOT NULL, "publicPartyChannelId" TEXT NOT NULL, "matchHubChannelId" TEXT NOT NULL, "moderationChannelId" TEXT NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL);
+CREATE TABLE "RolePartyChannel" ("id" TEXT PRIMARY KEY, "guildId" TEXT NOT NULL, "roleId" TEXT NOT NULL, "channelId" TEXT NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "RolePartyChannel_guildId_fkey" FOREIGN KEY ("guildId") REFERENCES "GuildConfig"("guildId") ON DELETE CASCADE);
+CREATE TABLE "UserConsent" ("guildId" TEXT NOT NULL, "userId" TEXT NOT NULL, "acceptedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "rulesVersion" TEXT NOT NULL DEFAULT '1', PRIMARY KEY ("guildId", "userId"));
+CREATE TABLE "DatePost" ("id" TEXT PRIMARY KEY, "guildId" TEXT NOT NULL, "creatorId" TEXT NOT NULL, "channelId" TEXT, "messageId" TEXT, "threadId" TEXT, "scheduledAt" TIMESTAMP(3) NOT NULL, "publicArea" TEXT NOT NULL, "privateLocation" TEXT NOT NULL, "activity" TEXT NOT NULL, "cost" TEXT NOT NULL, "desiredPerson" TEXT NOT NULL, "notes" TEXT, "status" "ActivityStatus" NOT NULL DEFAULT 'OPEN', "matchedUserId" TEXT, "matchingAppId" TEXT, "closedAt" TIMESTAMP(3), "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL);
+CREATE TABLE "DateApplication" ("id" TEXT PRIMARY KEY, "datePostId" TEXT NOT NULL, "applicantId" TEXT NOT NULL, "intro" TEXT NOT NULL, "status" "ApplicationStatus" NOT NULL DEFAULT 'PENDING', "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "DateApplication_datePostId_fkey" FOREIGN KEY ("datePostId") REFERENCES "DatePost"("id") ON DELETE CASCADE);
+CREATE TABLE "Party" ("id" TEXT PRIMARY KEY, "guildId" TEXT NOT NULL, "creatorId" TEXT NOT NULL, "channelId" TEXT, "messageId" TEXT, "visibilityRoleId" TEXT, "name" TEXT NOT NULL, "scheduledAt" TIMESTAMP(3) NOT NULL, "signupDeadline" TIMESTAMP(3) NOT NULL, "publicArea" TEXT NOT NULL, "privateLocation" TEXT NOT NULL, "description" TEXT NOT NULL, "capacity" INTEGER NOT NULL, "status" "ActivityStatus" NOT NULL DEFAULT 'OPEN', "closedAt" TIMESTAMP(3), "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL);
+CREATE TABLE "PartyAttendance" ("id" TEXT PRIMARY KEY, "partyId" TEXT NOT NULL, "userId" TEXT NOT NULL, "status" "AttendanceStatus" NOT NULL, "queueNumber" INTEGER, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "PartyAttendance_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "Party"("id") ON DELETE CASCADE);
+CREATE TABLE "UserBlock" ("guildId" TEXT NOT NULL, "blockerId" TEXT NOT NULL, "blockedId" TEXT NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY ("guildId", "blockerId", "blockedId"));
+CREATE TABLE "Report" ("id" TEXT PRIMARY KEY, "guildId" TEXT NOT NULL, "reporterId" TEXT NOT NULL, "reportedUserId" TEXT NOT NULL, "datePostId" TEXT, "partyId" TEXT, "reason" TEXT NOT NULL, "evidence" TEXT, "status" "ReportStatus" NOT NULL DEFAULT 'OPEN', "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "resolvedAt" TIMESTAMP(3));
+CREATE TABLE "ModerationAction" ("id" TEXT PRIMARY KEY, "guildId" TEXT NOT NULL, "moderatorId" TEXT NOT NULL, "targetUserId" TEXT NOT NULL, "reportId" TEXT, "action" "ModerationActionType" NOT NULL, "reason" TEXT NOT NULL, "expiresAt" TIMESTAMP(3), "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE "RateLimitEvent" ("id" TEXT PRIMARY KEY, "guildId" TEXT NOT NULL, "userId" TEXT NOT NULL, "action" TEXT NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE "InteractionDraft" ("id" TEXT PRIMARY KEY, "guildId" TEXT NOT NULL, "userId" TEXT NOT NULL, "kind" TEXT NOT NULL, "payload" JSONB NOT NULL, "expiresAt" TIMESTAMP(3) NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP);
+
+CREATE UNIQUE INDEX "RolePartyChannel_guildId_roleId_key" ON "RolePartyChannel"("guildId", "roleId");
+CREATE UNIQUE INDEX "RolePartyChannel_guildId_channelId_key" ON "RolePartyChannel"("guildId", "channelId");
+CREATE INDEX "DatePost_guildId_creatorId_createdAt_idx" ON "DatePost"("guildId", "creatorId", "createdAt");
+CREATE INDEX "DatePost_guildId_status_scheduledAt_idx" ON "DatePost"("guildId", "status", "scheduledAt");
+CREATE UNIQUE INDEX "DateApplication_datePostId_applicantId_key" ON "DateApplication"("datePostId", "applicantId");
+CREATE INDEX "DateApplication_applicantId_createdAt_idx" ON "DateApplication"("applicantId", "createdAt");
+CREATE INDEX "Party_guildId_creatorId_createdAt_idx" ON "Party"("guildId", "creatorId", "createdAt");
+CREATE INDEX "Party_guildId_status_scheduledAt_idx" ON "Party"("guildId", "status", "scheduledAt");
+CREATE UNIQUE INDEX "PartyAttendance_partyId_userId_key" ON "PartyAttendance"("partyId", "userId");
+CREATE UNIQUE INDEX "PartyAttendance_partyId_queueNumber_key" ON "PartyAttendance"("partyId", "queueNumber");
+CREATE INDEX "PartyAttendance_userId_createdAt_idx" ON "PartyAttendance"("userId", "createdAt");
+CREATE INDEX "UserBlock_guildId_blockedId_idx" ON "UserBlock"("guildId", "blockedId");
+CREATE INDEX "Report_guildId_status_createdAt_idx" ON "Report"("guildId", "status", "createdAt");
+CREATE INDEX "Report_reportedUserId_createdAt_idx" ON "Report"("reportedUserId", "createdAt");
+CREATE INDEX "ModerationAction_guildId_targetUserId_createdAt_idx" ON "ModerationAction"("guildId", "targetUserId", "createdAt");
+CREATE INDEX "ModerationAction_expiresAt_idx" ON "ModerationAction"("expiresAt");
+CREATE INDEX "RateLimitEvent_guildId_userId_action_createdAt_idx" ON "RateLimitEvent"("guildId", "userId", "action", "createdAt");
+CREATE INDEX "InteractionDraft_expiresAt_idx" ON "InteractionDraft"("expiresAt");
