@@ -15,7 +15,7 @@
 5. 註冊指令並啟動：
 
 ```bash
-docker compose run --rm bot pnpm run commands:register
+docker compose run --rm --build bot pnpm run commands:register
 docker compose up -d --build
 docker compose logs -f bot
 ```
@@ -57,7 +57,7 @@ Bot 容器啟動時會自動執行 `prisma migrate deploy`。
 pnpm install
 pnpm run db:generate
 pnpm run db:dev
-pnpm run commands:register
+pnpm run commands:register:dev
 pnpm run dev
 ```
 
