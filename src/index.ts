@@ -1,4 +1,4 @@
-import { Client, Events, GatewayIntentBits, type Interaction } from "discord.js";
+import { Client, Events, GatewayIntentBits, MessageFlags, type Interaction } from "discord.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { handleButton } from "./handlers/components.js";
@@ -15,8 +15,8 @@ async function reportError(interaction: Interaction, error: unknown) {
   if (!interaction.isRepliable()) return;
   try {
     if (interaction.deferred) await interaction.editReply(content);
-    else if (interaction.replied) await interaction.followUp({ content, ephemeral: true });
-    else await interaction.reply({ content, ephemeral: true });
+    else if (interaction.replied) await interaction.followUp({ content, flags: MessageFlags.Ephemeral });
+    else await interaction.reply({ content, flags: MessageFlags.Ephemeral });
   } catch (responseError) {
     console.error("無法回覆錯誤訊息", responseError);
   }

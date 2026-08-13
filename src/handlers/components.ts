@@ -1,6 +1,6 @@
 import { ActivityStatus, ApplicationStatus, AttendanceStatus } from "@prisma/client";
 import {
-  ActionRowBuilder, ButtonInteraction, ChannelType, ModalBuilder,
+  ActionRowBuilder, ButtonInteraction, ChannelType, MessageFlags, ModalBuilder,
   TextInputBuilder, TextInputStyle
 } from "discord.js";
 import { prisma } from "../db.js";
@@ -32,7 +32,7 @@ async function acceptDate(interaction: ButtonInteraction, applicationId: string)
     return true;
   });
   if (!reserved) throw new Error("此約會已完成媒合或正在處理其他申請。");
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   let threadId: string | null = null;
   try {
     const guild = await interaction.client.guilds.fetch(post.guildId);
@@ -79,7 +79,7 @@ async function declineDate(interaction: ButtonInteraction, applicationId: string
   if (!updated.count) throw new Error("此申請已被處理。");
   const guild = await interaction.client.guilds.fetch(app.datePost.guildId);
   await safeDm(guild, app.applicantId, `你對約會「${app.datePost.activity}」的申請未被接受。`);
-  await interaction.reply({ content: "已拒絕申請。", ephemeral: true });
+  await interaction.reply({ content: "已拒絕申請。", flags: MessageFlags.Ephemeral });
 }
 
 export async function handleButton(interaction: ButtonInteraction): Promise<void> {
@@ -117,13 +117,13 @@ export async function handleButton(interaction: ButtonInteraction): Promise<void
         throw error;
       }
     }
-    await interaction.reply({ content: result.status === AttendanceStatus.GOING ? `報名成功！已將你加入私人討論串：<#${partyThreadId}>。` : "目前已額滿，你已加入候補。", ephemeral: true });
+    await interaction.reply({ content: result.status === AttendanceStatus.GOING ? `報名成功！已將你加入私人討論串：<#${partyThreadId}>。` : "目前已額滿，你已加入候補。", flags: MessageFlags.Ephemeral });
     await refreshParty(interaction, parsed.id); return;
   }
   if (parsed.action === "party_leave") {
     const result = await leaveParty(interaction.guildId, parsed.id, interaction.user.id);
     if (result.threadId) await removeActivityThreadMember(guild, result.threadId, interaction.user.id).catch(error => console.error("移除派對討論串成員失敗", error));
-    await interaction.reply({ content: "已退出此派對。", ephemeral: true });
+    await interaction.reply({ content: "已退出此派對。", flags: MessageFlags.Ephemeral });
     if (result.promotedUserId) {
       const threadId = result.threadId ?? await ensurePartyThread(guild, parsed.id).catch(() => undefined);
       let added = false;

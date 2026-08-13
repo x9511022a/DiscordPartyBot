@@ -1,5 +1,5 @@
 import { ActivityStatus } from "@prisma/client";
-import { ChannelType, Guild, ModalSubmitInteraction } from "discord.js";
+import { ChannelType, Guild, MessageFlags, ModalSubmitInteraction } from "discord.js";
 import { prisma } from "../db.js";
 import { dateMessage, partyMessage } from "../views.js";
 import { partyCounts } from "../services/party.js";
@@ -39,7 +39,7 @@ export async function handleModal(interaction: ModalSubmitInteraction): Promise<
       const post = await prisma.datePost.update({ where: { id: p.id }, data });
       await prisma.interactionDraft.delete({ where: { id: draft.id } });
       await updatePublishedMessage(post.channelId, post.messageId, guild, dateMessage(post));
-      await interaction.reply({ content: `約會已更新：\`${post.id}\`。`, ephemeral: true }); return;
+      await interaction.reply({ content: `約會已更新：\`${post.id}\`。`, flags: MessageFlags.Ephemeral }); return;
     }
     const channel = await guild.channels.fetch(cfg.dateChannelId);
     if (!channel?.isTextBased()) throw new Error("設定的約會頻道不存在或無法傳送訊息。");
@@ -48,7 +48,7 @@ export async function handleModal(interaction: ModalSubmitInteraction): Promise<
       const message = await channel.send(dateMessage(post));
       await prisma.datePost.update({ where: { id: post.id }, data: { messageId: message.id } });
       await prisma.interactionDraft.delete({ where: { id: draft.id } });
-      await interaction.reply({ content: `約會已發布：${message.url}`, ephemeral: true });
+      await interaction.reply({ content: `約會已發布：${message.url}`, flags: MessageFlags.Ephemeral });
     } catch (error) {
       await prisma.datePost.delete({ where: { id: post.id } }); throw error;
     }
@@ -70,7 +70,7 @@ export async function handleModal(interaction: ModalSubmitInteraction): Promise<
     await prisma.interactionDraft.delete({ where: { id: draft.id } });
     const counts = await partyCounts(party.id);
     await updatePublishedMessage(party.channelId, party.messageId, guild, partyMessage(party, counts.going, counts.waiting));
-    await interaction.reply({ content: `派對已更新：\`${party.id}\`。`, ephemeral: true }); return;
+    await interaction.reply({ content: `派對已更新：\`${party.id}\`。`, flags: MessageFlags.Ephemeral }); return;
   }
   const roleChannel = p.roleId ? cfg.rolePartyChannels.find(x => x.roleId === p.roleId) : null;
   if (p.roleId && !roleChannel) throw new Error("此身分組尚未透過 `/設定 身分組頻道` 設定專屬頻道。");
@@ -85,7 +85,7 @@ export async function handleModal(interaction: ModalSubmitInteraction): Promise<
     threadId = thread.id;
     await prisma.party.update({ where: { id: party.id }, data: { messageId, threadId } });
     await prisma.interactionDraft.delete({ where: { id: draft.id } });
-    await interaction.reply({ content: `派對已發布：${message.url}`, ephemeral: true });
+    await interaction.reply({ content: `派對已發布：${message.url}`, flags: MessageFlags.Ephemeral });
   } catch (error) {
     if (threadId) { const thread = await guild.channels.fetch(threadId).catch(() => null); if (thread?.isThread()) await thread.delete("派對發布失敗，清理討論串").catch(() => undefined); }
     if (messageId) await channel.messages.delete(messageId).catch(() => undefined);
@@ -119,5 +119,5 @@ export async function handleDateApplicationModal(interaction: ModalSubmitInterac
     const creator = await interaction.client.users.fetch(post.creatorId);
     await creator.send({ content: `你收到約會「${post.activity}」的新申請。\n申請者：<@${interaction.user.id}>\n自介：${intro}`, components: [row] });
   } catch { delivered = false; }
-  await interaction.reply({ content: delivered ? "申請已私下送給發起者。" : "申請已儲存，但發起者目前無法接收私訊；請通知管理員檢查 bot 私訊設定。", ephemeral: true });
+  await interaction.reply({ content: delivered ? "申請已私下送給發起者。" : "申請已儲存，但發起者目前無法接收私訊；請通知管理員檢查 bot 私訊設定。", flags: MessageFlags.Ephemeral });
 }

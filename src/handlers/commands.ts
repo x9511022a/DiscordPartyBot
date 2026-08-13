@@ -1,5 +1,5 @@
 import {
-  ChannelType, ChatInputCommandInteraction, EmbedBuilder, PermissionFlagsBits
+  ChannelType, ChatInputCommandInteraction, EmbedBuilder, MessageFlags, PermissionFlagsBits
 } from "discord.js";
 import { prisma } from "../db.js";
 import { resolveGuild } from "../utils/discord.js";
@@ -28,7 +28,7 @@ async function handleSetup(interaction: ChatInputCommandInteraction) {
   const subcommand = interaction.options.getSubcommand();
   const existing = await prisma.guildConfig.findUnique({ where: { guildId: interaction.guildId! }, include: { rolePartyChannels: true } });
   if (subcommand === "頻道") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const panel = interaction.options.getChannel("操作面板", true);
     const date = interaction.options.getChannel("約會貼文", true);
     const party = interaction.options.getChannel("公開派對", true);
@@ -55,11 +55,11 @@ async function handleSetup(interaction: ChatInputCommandInteraction) {
       where: { guildId_roleId: { guildId: interaction.guildId!, roleId: role.id } },
       create: { guildId: interaction.guildId!, roleId: role.id, channelId: channel.id }, update: { channelId: channel.id }
     });
-    await interaction.reply({ content: `✅ 已將 <@&${role.id}> 對應至 <#${channel.id}>。`, ephemeral: true });
+    await interaction.reply({ content: `✅ 已將 <@&${role.id}> 對應至 <#${channel.id}>。`, flags: MessageFlags.Ephemeral });
     return;
   }
   const roles = existing.rolePartyChannels.map(item => `<@&${item.roleId}> → <#${item.channelId}>`).join("\n") || "尚未設定";
-  await interaction.reply({ ephemeral: true, embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("DiscordPartyBot 頻道設定").addFields(
+  await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("DiscordPartyBot 頻道設定").addFields(
     { name: "操作面板", value: existing.panelChannelId ? `<#${existing.panelChannelId}>` : "尚未設定", inline: true },
     { name: "約會貼文", value: `<#${existing.dateChannelId}>`, inline: true },
     { name: "公開派對", value: `<#${existing.publicPartyChannelId}>`, inline: true },
@@ -76,7 +76,7 @@ export async function replyMainPanel(interaction: ChatInputCommandInteraction) {
     prisma.userConsent.findUnique({ where: { guildId_userId: { guildId: interaction.guildId!, userId: interaction.user.id } } }),
     guild.members.fetch(interaction.user.id)
   ]);
-  await interaction.reply({ ...mainPanelView(config, Boolean(consent), member), ephemeral: true });
+  await interaction.reply({ ...mainPanelView(config, Boolean(consent), member), flags: MessageFlags.Ephemeral });
 }
 
 export async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
